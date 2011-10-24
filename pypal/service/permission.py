@@ -2,6 +2,8 @@
 """
 """
 
+import logging
+
 PRODUCTION_ENDPOINT = 'https://svcs.paypal.com'
 SANDBOX_ENDPOINT = 'https://svcs.sandbox.paypal.com'
 
