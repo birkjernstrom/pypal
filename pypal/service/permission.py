@@ -122,7 +122,6 @@ REQUEST_PERMISSION_MAPPING = {
 def call(client, method, params):
     endpoint = (PRODUCTION_ENDPOINT, SANDBOX_ENDPOINT)
     endpoint = endpoint[int(client.config.in_sandbox)]
-    logging.debug(endpoint)
     return client.call('Permissions', method, endpoint=endpoint, **params)
 
 
@@ -156,7 +155,6 @@ def get_credentials(client, request_token, verification_code):
     if not response.success:
         return (None, None)
 
-    logging.debug(response)
     access_token = response.get('token', None)
     secret_token = response.get('tokenSecret', None)
     if access_token and secret_token:

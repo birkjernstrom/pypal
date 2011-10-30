@@ -160,23 +160,35 @@ class Response(dict):
                 return value[0]
             return value
 
-        first = keys[0]
+        def handle_nested(key, start_needle='(', end_needle=')'):
+            replaced = None
+            if not isinstance(key, basestring) or end_needle != key[-1]:
+                return replaced
 
-        if isinstance(first, basestring) and first[-1] == ')':
             try:
-                # Find the first occurence of '(' and construct
+                # Find the first occurence of ``'start_needle'`` and construct
                 # the list necessary to contain all items associated
                 # with that context, i.e having the same context id.
-                n_position = first.index('(')
+                n_position = key.index(start_needle)
                 # Retrieve the context id
-                n = int(first[(n_position + 1):-1])
+                n = int(key[(n_position + 1):-1])
                 # Remove context identifier from the current key
-                first = first[:n_position]
+                replaced = key[:n_position]
                 # Insert the context identifier amongst the keys to
                 # be created in the next depth of the dictionary
                 keys.insert(1, n)
             except ValueError:
                 pass
+            return replaced
+
+        first = keys[0]
+        key = handle_nested(first)
+        if not key:
+            key = handle_nested(first, start_needle='[', end_needle=']')
+            if key:
+                first = key
+        else:
+            first = key
 
         if first not in result:
             result[first] = {}
@@ -213,7 +225,8 @@ class Client(object):
             self.config = config
 
     def call(self, api_group, api_action, endpoint=None, **params):
-        """Send an API request.
+        """Wrapper of our send method which simplifies URL generation
+        depending on intended API group and actions.
 
         :param api_group: Which API group the action belongs to, e.g Permissions
         :param api_action: Which API action within the group to call
@@ -223,21 +236,27 @@ class Client(object):
         :param params: Dictionary containing the key-value pairs required
                        for the given action.
         """
-        headers = self.get_headers()
-        body = self.prepare(params)
-
         endpoint = self.config.endpoint if not endpoint else endpoint
         url = endpoint + '/%s/%s' % (api_group, api_action)
 
         try:
-            request = urllib2.Request(url, body, headers)
-            raw_response = urllib2.urlopen(request).read()
-            logging.debug(raw_response)
-            data = self.parse(raw_response)
+            response = self.send(url, self.prepare(params))
+            response_body = response.read()
+            data = self.parse(response_body)
         except urllib2.HTTPError as e:
             logging.error(e.strerror)
             return Response(None, None, http_error=e)
-        return Response(raw_response, data)
+        return Response(response_body, data)
+
+    def send(self, url, body=None):
+        """Send an API request against given url.
+
+        :param url: The PayPal URL to target
+        :param body: The HTTP request body
+        """
+        headers = self.get_headers()
+        request = urllib2.Request(url, body, headers)
+        return urllib2.urlopen(request)
 
     def get_headers(self):
         """Retrieve dictionary containing the necessary HTTP headers
@@ -278,7 +297,8 @@ class Client(object):
         """
         return self._get_protocol_method(parse_action=True)(raw_response)
 
-    def parse_nvp(self, raw_response):
+    @classmethod
+    def parse_nvp(cls, raw_response):
         """Parse the raw response as NVP data.
 
         :param raw_response: The raw string given in the PayPal response
@@ -286,25 +306,30 @@ class Client(object):
         from urlparse import parse_qs
         return parse_qs(raw_response)
 
-    def parse_json(self, raw_response):
+    @classmethod
+    def parse_json(cls, raw_response):
         raise NotImplemented()
 
-    def parse_xml(self, raw_response):
+    @classmethod
+    def parse_xml(cls, raw_response):
         raise NotImplemented()
 
     def prepare(self, params):
         params = util.ensure_unicode(params)
         return self._get_protocol_method(parse_action=False)(params)
 
-    def prepare_nvp(self, params):
+    @classmethod
+    def prepare_nvp(cls, params):
         from urllib import urlencode
         prepared = util.prepare_nvp_dict(params)
         return urlencode(prepared)
 
-    def prepare_xml(self, params):
+    @classmethod
+    def prepare_xml(cls, params):
         raise NotImplemented()
 
-    def prepare_json(self, params):
+    @classmethod
+    def prepare_json(cls, params):
         raise NotImplemented()
 
     def _get_protocol_method(self, parse_action=True):
