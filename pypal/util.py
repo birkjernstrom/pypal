@@ -1,5 +1,20 @@
 # -*- coding: utf-8 -*-
 
+TIME_FORMAT = '%a %b %d %H:%M:%S PDT %Y'
+
+def convert_timestamp_into_utc(timestamp):
+    import time, pytz
+    from datetime import datetime
+
+    utc = pytz.timezone('UTC')
+    paypal_timezone = pytz.timezone('US/Pacific')
+
+    timestamp = time.mktime(time.strptime(timestamp, TIME_FORMAT))
+    print timestamp
+    localized = paypal_timezone.localize(datetime.fromtimestamp(timestamp))
+    print localized
+    normalized = paypal_timezone.normalize(localized)
+    return normalized.astimezone(utc)
 
 def is_iterable(obj):
     import collections

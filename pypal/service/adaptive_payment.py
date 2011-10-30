@@ -1,5 +1,7 @@
 # -*- coding: utf-8 -*-
 
+import logging
+
 from pypal import currency
 
 PRODUCTION_ENDPOINT = 'https://svcs.paypal.com'
@@ -39,12 +41,13 @@ def call(client, method, params):
     return client.call('AdaptivePayments', method,
                        endpoint=endpoint, **params)
 
-def get_payment_url(client,
-                    action_type,
-                    currency_code,
-                    cancel_url,
-                    return_url,
-                    receivers=None):
+def get_pay_url(client,
+                action_type,
+                currency_code,
+                cancel_url,
+                return_url,
+                ipn_callback_url=None,
+                receivers=None):
     """
     """
     response = pay(**locals())
@@ -68,7 +71,9 @@ def pay(client,
         currency_code,
         cancel_url,
         return_url,
-        receivers=None):
+        ipn_callback_url=None,
+        receivers=None,
+        **kwargs):
     """
     """
     if not cancel_url:
@@ -94,9 +99,16 @@ def pay(client,
     if not receivers:
         raise ValueError('No receivers given')
 
-    return call(client, 'Pay', {'actionType': action_type,
-                                'receiverList.receiver': receivers,
-                                'currencyCode': currency_code,
-                                'cancelUrl': cancel_url,
-                                'returnUrl': return_url,
-                                'requestEnvelope.errorLanguage': 'en_US'})
+    params = {'actionType': action_type,
+              'receiverList.receiver': receivers,
+              'currencyCode': currency_code,
+              'cancelUrl': cancel_url,
+              'returnUrl': return_url,
+              'requestEnvelope.errorLanguage': 'en_US'}
+
+    if ipn_callback_url is not None:
+        params['ipnNotificationUrl'] = ipn_callback_url
+
+    params.update(kwargs)
+    logging.debug(params)
+    return call(client, 'Pay', params)
