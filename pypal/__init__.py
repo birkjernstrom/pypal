@@ -239,6 +239,9 @@ class Client(object):
         endpoint = self.config.endpoint if not endpoint else endpoint
         url = endpoint + '/%s/%s' % (api_group, api_action)
 
+        if 'requestEnvelope' not in params:
+            params['requestEnvelope'] = self.config.request_envelope
+
         try:
             response = self.send(url, self.prepare(params))
             response_body = response.read()

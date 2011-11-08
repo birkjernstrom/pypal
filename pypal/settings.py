@@ -16,6 +16,8 @@ SUPPORTED_PROTOCOLS = {NVP_PROTOCOL: True,
                        XML_PROTOCOL: True,
                        JSON_PROTOCOL: True}
 
+DEFAULT_REQUEST_ENVELOPE = {'errorLanguage': 'en_US'}
+
 class Config(object):
     """
     """
@@ -27,6 +29,7 @@ class Config(object):
                  token_authentication=True,
                  in_sandbox=True,
                  protocol=NVP_PROTOCOL,
+                 request_envelope=DEFAULT_REQUEST_ENVELOPE,
                  **kwargs):
         """
         """
@@ -36,8 +39,8 @@ class Config(object):
         self.application_id = application_id
         self.token_authentication = token_authentication
         self.in_sandbox = in_sandbox
-
         self.protocol = protocol
+        self.request_envelope = request_envelope
 
         if kwargs:
             for k, v in kwargs.items():

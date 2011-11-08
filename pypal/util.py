@@ -1,20 +1,49 @@
 # -*- coding: utf-8 -*-
 
-TIME_FORMAT = '%a %b %d %H:%M:%S PDT %Y'
+TIME_FORMAT = '%a %b %d %H:%M:%S %Y'
 
 def convert_timestamp_into_utc(timestamp):
+    """Convert given PayPal timestamp into UTC.
+
+    We utilize pytz here since Pacific Standard Time is the timezone
+    used in PayPal timestamps. However, in case UTC timestamps are
+    not required in your application this can be disabled in your
+    configuration, i.e no need to install pytz.
+
+    :param timestamp: The PayPal timestamp
+    """
     import time, pytz
     from datetime import datetime
 
     utc = pytz.timezone('UTC')
     paypal_timezone = pytz.timezone('US/Pacific')
 
+    # This is a dragon. In the code. Hatching an egg.
+    # This is in order to remove the timezone which cannot be
+    # safely retrieved using %Z in the format string.
+    # Since we use pytz we have also already explicitly
+    # declared the timezone.
+    timestamp = timestamp.split(' ')
+    del timestamp[4]
+    timestamp = ' '.join(timestamp)
+
     timestamp = time.mktime(time.strptime(timestamp, TIME_FORMAT))
-    print timestamp
     localized = paypal_timezone.localize(datetime.fromtimestamp(timestamp))
-    print localized
     normalized = paypal_timezone.normalize(localized)
     return normalized.astimezone(utc)
+
+def check_required(arguments, required):
+    for required_argument in required:
+        v = arguments.get(required_argument, None)
+        if v is None:
+            raise ValueError('No value given for %s which is '
+                             'a required argument' % required_argument)
+
+def set_nonempty_param(params, key, value):
+    if not value:
+        return False
+    params[key] = value
+    return True
 
 def is_iterable(obj):
     import collections
