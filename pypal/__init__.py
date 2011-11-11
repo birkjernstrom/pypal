@@ -39,23 +39,21 @@ class Response(dict):
     a dictionary which accurately reflects the data hierarchy.
 
     """
-    def __init__(self, raw, shallow, http_error=False):
+    def __init__(self, raw, response_dict, http_error=False):
         """Initialize the response object and convert the shallow
         response dictionary into one that resembling the
         hierarchy set by PayPal.
 
         :param raw: Unparsed response, i.e raw response body
-        :param shallow: The one level deep dictionary retrieved using
-                        ``'Client.parse'``
+        :param response_dict: Prepared dictionary which has been generated
+                              by parsing the raw response body.
         :param http_error: The HTTPError exception in case it is caught
                            during execution of the request.
         """
         self.raw = raw
-        self.shallow = None
         self.http_error = http_error
-        if shallow:
-            self.shallow = shallow
-            self.update(self.construct_hierarchy(shallow))
+        if response_dict:
+            self.update(response_dict)
 
     def get_response_envelope(self):
         """Retrieve the data contained in the response envelope."""
@@ -77,8 +75,7 @@ class Response(dict):
             return ack
         return ack.upper()
 
-    @property
-    def success(self):
+    def is_success(self):
         """Check whether the response resembles success or not."""
         if self.http_error:
             return False
@@ -88,114 +85,7 @@ class Response(dict):
             return False
         return (ack == ACK_SUCCESS or ack == ACK_SUCCESS_WITH_WARNING)
 
-    @classmethod
-    def construct_hierarchy(cls, shallow):
-        """Walk the given one level deep dictionary given by our client
-        interface and convert it into one that reflects the intended
-        hierarchy.
-
-        :param shallow: The shallow dictionary given by the client
-                        on response initialization.
-        """
-        dictionary = {}
-        for key, value in shallow.items():
-            hierarchy = key.split('.')
-            dictionary = cls._recursive_parse(dictionary, hierarchy, value)
-        return dictionary
-
-    @classmethod
-    def _recursive_parse(cls, result, keys, value):
-        """Construct hierarchy for one key in shallow response dictionary.
-        PayPal has the standard of naming keys depending on which group
-        they belong to - an example::
-
-            responseEnvelope.timestamp
-
-        The hierarchy can go even deeper, one case is when there is an
-        error in the request. In those instances PayPal specifies in which
-        context certain parameters belongs to. An example of this::
-
-            error(0).parameter(0)
-            error(1).domain
-
-        Using these keys in our response dictionary is less than ideal.
-        Instead we parse each key in order to detect these patterns
-        in order to construct a dictionary which is easier to work with.
-
-        The examples above, along with others, will therefore end up
-        in a dictionary resembling the one below::
-
-            {
-                'responseEnvelope': {
-                    'timestamp': |VALUE|
-                },
-                error: [
-                    {
-                        parameter: {
-                            0: |FIRST_PARAMETER|,
-                            1: |SECOND_PARAMETER|,
-                            errorId: |ERROR_ID|
-                        },
-                        domain: |VALUE|
-                    },
-                    {
-                        parameter: {
-                            0: |FIRST_PARAMETER|,
-                            1: |SECOND_PARAMETER|,
-                            errorId: |ERROR_ID|
-                        },
-                        domain: |VALUE|
-                    }
-                ]
-            }
-
-        :param result: The dictionary in which all children should
-                       be contained
-        :param keys: List containing the strings found in one key instance
-                     after splitting it by all the dots.
-        :param value: The value assigned to the given key
-        """
-        if not keys:
-            if len(value) == 1:
-                return value[0]
-            return value
-
-        def handle_nested(key, start_needle='(', end_needle=')'):
-            replaced = None
-            if not isinstance(key, basestring) or end_needle != key[-1]:
-                return replaced
-
-            try:
-                # Find the first occurence of ``'start_needle'`` and construct
-                # the list necessary to contain all items associated
-                # with that context, i.e having the same context id.
-                n_position = key.index(start_needle)
-                # Retrieve the context id
-                n = int(key[(n_position + 1):-1])
-                # Remove context identifier from the current key
-                replaced = key[:n_position]
-                # Insert the context identifier amongst the keys to
-                # be created in the next depth of the dictionary
-                keys.insert(1, n)
-            except ValueError:
-                pass
-            return replaced
-
-        first = keys[0]
-        key = handle_nested(first)
-        if not key:
-            key = handle_nested(first, start_needle='[', end_needle=']')
-            if key:
-                first = key
-        else:
-            first = key
-
-        if first not in result:
-            result[first] = {}
-
-        result[first] = cls._recursive_parse(result[first], keys[1:], value)
-        return result
-
+    success = property(is_success)
 
 PAYPAL_BASE_URL = 'https://www.paypal.com'
 PAYPAL_SANDBOX_BASE_URL = 'https://www.sandbox.paypal.com'
@@ -213,10 +103,10 @@ class Client(object):
         There is no need for more than one instance of the client
         unless the configuration has to vary.
 
-        :param config: Prepared instance of ```settings.Config``` which will
+        :param config: Prepared instance of ``'pypal.settings.Config``` which will
                        take precedence over any key-values given.
         :param kwargs: Key-value pairs which are passed along to a new instance
-                       of ```settings.Config``` in case the config argument
+                       of ``'pypal.settings.Config'`` in case the config argument
                        was not given.
         """
         if not config:
@@ -243,9 +133,11 @@ class Client(object):
             params['requestEnvelope'] = self.config.request_envelope
 
         try:
-            response = self.send(url, self.prepare(params))
+            request_body = self.render_request_body(params)
+
+            response = self.send(url, request_body)
             response_body = response.read()
-            data = self.parse(response_body)
+            data = self.parse_response_body(response_body)
         except urllib2.HTTPError as e:
             logging.error(e.strerror)
             return Response(None, None, http_error=e)
@@ -266,7 +158,7 @@ class Client(object):
         to set when sending requests to PayPal.
 
         They contain the credentials required to successfully authenticate
-        your application along with what protocol to use.
+        your application along with specification of which format to utilize.
 
         """
         ret = {}
@@ -277,8 +169,8 @@ class Client(object):
             ret['X-PAYPAL-SECURITY-USERID'] = self.config.api_username
             ret['X-PAYPAL-SECURITY-PASSWORD'] = self.config.api_password
             ret['X-PAYPAL-SECURITY-SIGNATURE'] = self.config.api_signature
-            ret['X-PAYPAL-REQUEST-DATA-FORMAT'] = self.config.protocol
-            ret['X-PAYPAL-RESPONSE-DATA-FORMAT'] = self.config.protocol
+            ret['X-PAYPAL-REQUEST-DATA-FORMAT'] = self.config.api_format
+            ret['X-PAYPAL-RESPONSE-DATA-FORMAT'] = self.config.api_format
             return ret
 
         # TODO: Implement the authentication method utilizing given
@@ -292,65 +184,39 @@ class Client(object):
             base = PAYPAL_BASE_URL
         return base + path
 
-    def parse(self, raw_response):
-        """Trigger the appropriate parse method depending on which protocol
-        is being used.
-
-        :param raw_response: The raw string given in the PayPal response
-        """
-        return self._get_protocol_method(parse_action=True)(raw_response)
+    def parse_response_body(self, response, format=None):
+        formatter = self._get_format_method(True, format=format)
+        dictionary = formatter(response)
+        return util.ensure_unicode(dictionary)
 
     @classmethod
-    def parse_nvp(cls, raw_response):
-        """Parse the raw response as NVP data.
+    def parse_json(cls, response):
+        json = get_json_module()
+        return json.loads(response)
 
-        :param raw_response: The raw string given in the PayPal response
-        """
-        from urlparse import parse_qs
-        return parse_qs(raw_response)
-
-    @classmethod
-    def parse_json(cls, raw_response):
-        raise NotImplemented()
-
-    @classmethod
-    def parse_xml(cls, raw_response):
-        raise NotImplemented()
-
-    def prepare(self, params):
+    def render_request_body(self, params, format=None):
         params = util.ensure_unicode(params)
-        return self._get_protocol_method(parse_action=False)(params)
+        formatter = self._get_format_method(False, format=format)
+        return formatter(params)
 
     @classmethod
-    def prepare_nvp(cls, params):
-        from urllib import urlencode
-        prepared = util.prepare_nvp_dict(params)
-        return urlencode(prepared)
+    def render_json(cls, params):
+        json = get_json_module()
+        return json.dumps(params)
 
-    @classmethod
-    def prepare_xml(cls, params):
-        raise NotImplemented()
+    def _get_format_method(self, parse_method, format=None):
+        if not format:
+            format = self.config.api_format
 
-    @classmethod
-    def prepare_json(cls, params):
-        raise NotImplemented()
+        format = format.lower()
+        method_prefixes = ('render', 'parse')
+        method_name = '%s_%s' % (method_prefixes[parse_method], format)
+        return getattr(self, method_name)
 
-    def _get_protocol_method(self, parse_action=True):
-        identifier = 'parse' if parse_action else 'prepare'
-        property_reference = '_%s_method' % identifier
-        method = getattr(self, property_reference, None)
-        if method:
-            return method
 
-        if self.config.protocol == settings.NVP_PROTOCOL:
-            method = getattr(self, '%s_nvp' % identifier)
-        elif self.config.protocol == settings.JSON_PROTOCOL:
-            method = getattr(self, '%s_json' % identifier)
-        else:
-            # PayPal will default to XML in case the protocol
-            # is not set accurately. Therefore, we do the same
-            # in order to handle the error response correctly.
-            method = getattr(self, '%s_xml' % identifier)
-
-        setattr(self, property_reference, method)
-        return method
+def get_json_module():
+    try:
+        import json
+    except ImportError:
+        import simplejson as json
+    return json

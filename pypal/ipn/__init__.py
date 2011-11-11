@@ -2,6 +2,7 @@
 
 import logging
 from pypal import Response, Client, util
+from pypal import nvp
 
 VERIFICATION_RESPONSE = 'VERIFIED'
 
@@ -13,10 +14,9 @@ MODULE_MAPPING = {EVENT_ADAPTIVE: 'pay'}
 PRODUCTION_ENDPOINT = 'https://www.paypal.com'
 SANDBOX_ENDPOINT = 'https://www.sandbox.paypal.com'
 
-def parse(raw_response):
-    assert raw_response
-    shallow_response = Client.parse_nvp(raw_response)
-    return (raw_response, shallow_response)
+def parse(request_body):
+    assert request_body
+    return nvp.parse(request_body)
 
 
 class Listener(object):
@@ -37,12 +37,12 @@ class Listener(object):
         for callback in callbacks:
             callback(*args, **kwargs)
 
-    def verify(self, arguments_received):
+    def verify(self, request_body):
         endpoint = (PRODUCTION_ENDPOINT, SANDBOX_ENDPOINT)
         endpoint = endpoint[int(self.client.config.in_sandbox)]
 
         url = endpoint + '/cgi-bin/webscr'
-        body = 'cmd=_notify-validate&%s' % arguments_received
+        body = 'cmd=_notify-validate&%s' % request_body
 
         response = self.client.send(url, body)
         http_code = response.getcode()
@@ -53,22 +53,22 @@ class Listener(object):
 
         self.trigger(EVENT_INVALID_NOTIFICATION,
                      http_code,
-                     arguments_received,
+                     request_body,
                      raw_response)
         return False
 
     def dispatch(self, request_body):
-        raw_response, shallow_response = parse(request_body)
-        if not self.verify(raw_response):
+        arguments = parse(request_body)
+        if not self.verify(request_body):
             return False
 
-        event_name = self.get_response_event_type(shallow_response)
+        event_name = self.get_response_event_type(arguments)
         if not event_name:
             return False
 
         response = self.get_response_instance(event_name,
-                                              raw_response,
-                                              shallow_response)
+                                              request_body,
+                                              arguments)
 
         if not response:
             return False
@@ -77,7 +77,7 @@ class Listener(object):
         return True
 
     @staticmethod
-    def get_response_instance(event_name, raw_response, shallow_response):
+    def get_response_instance(event_name, request_body, arguments):
         module_name = MODULE_MAPPING.get(event_name, None)
         if not module_name:
             return None
@@ -86,7 +86,7 @@ class Listener(object):
         module_response = __import__(module_name, None, None, ['Response'], 0)
         if not (module_response or hasattr(module_response, 'Response')):
             return None
-        return module_response.Response(raw_response, shallow_response)
+        return module_response.Response(request_body, arguments)
 
     @staticmethod
     def get_response_event_type(response):

@@ -8,13 +8,11 @@ SANDBOX_CERTIFICATE_ENDPOINT = 'https://api.sandbox.paypal.com/nvp'
 PRODUCTION_3TOKEN_ENDPOINT = 'https://api-3t.paypal.com/nvp'
 PRODUCTION_CERTIFICATE_ENDPOINT = 'https://api.paypal.com/nvp'
 
-NVP_PROTOCOL = 'NV'
-XML_PROTOCOL = 'XML'
-JSON_PROTOCOL = 'JSON'
+NVP_FORMAT = 'NV'
+XML_FORMAT = 'XML'
+JSON_FORMAT = 'JSON'
 
-SUPPORTED_PROTOCOLS = {NVP_PROTOCOL: True,
-                       XML_PROTOCOL: True,
-                       JSON_PROTOCOL: True}
+SUPPORTED_FORMATS = {JSON_FORMAT: True}
 
 DEFAULT_REQUEST_ENVELOPE = {'errorLanguage': 'en_US'}
 
@@ -28,7 +26,7 @@ class Config(object):
                  application_id=None,
                  token_authentication=True,
                  in_sandbox=True,
-                 protocol=NVP_PROTOCOL,
+                 api_format=JSON_FORMAT,
                  request_envelope=DEFAULT_REQUEST_ENVELOPE,
                  **kwargs):
         """
@@ -39,24 +37,24 @@ class Config(object):
         self.application_id = application_id
         self.token_authentication = token_authentication
         self.in_sandbox = in_sandbox
-        self.protocol = protocol
+        self.api_format = api_format
         self.request_envelope = request_envelope
 
         if kwargs:
             for k, v in kwargs.items():
                 setattr(self, k, v)
 
-    def get_protocol(self):
-        return getattr(self, '_protocol', JSON_PROTOCOL)
+    def get_format(self):
+        return self.api_format
 
-    def set_protocol(self, choice):
+    def set_format(self, choice):
         choice = choice.upper()
-        is_supported = SUPPORTED_PROTOCOLS.get(choice, False)
+        is_supported = SUPPORTED_FORMATS.get(choice, False)
         if not is_supported:
-            raise ValueError('Unsupported protocol chosen')
-        self._protocol = choice
+            raise ValueError('Unsupported API format chosen')
+        self.api_format = choice
 
-    protocol = property(get_protocol, set_protocol)
+    format = property(get_format, set_format)
 
     def is_sandbox_mode(self):
         return getattr(self, 'in_sandbox', True)

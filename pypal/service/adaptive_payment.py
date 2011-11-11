@@ -8,13 +8,32 @@ from pypal.util import check_required, set_nonempty_param
 PRODUCTION_ENDPOINT = 'https://svcs.paypal.com'
 SANDBOX_ENDPOINT = 'https://svcs.sandbox.paypal.com'
 
-PAY_ACTION = 'PAY'
-CREATE_ACTION = 'CREATE'
-PAY_PRIMARY_ACTION = 'PAY_PRIMARY'
+ACTION_PAY = 'PAY'
+ACTION_CREATE = 'CREATE'
+ACTION_PAY_PRIMARY = 'PAY_PRIMARY'
 
-EXISTING_PAY_ACTIONS = frozenset([PAY_ACTION,
-                                  CREATE_ACTION,
-                                  PAY_PRIMARY_ACTION])
+SUPPORTED_PAY_ACTIONS = frozenset([ACTION_PAY,
+                                   ACTION_CREATE,
+                                   ACTION_PAY_PRIMARY])
+
+
+FEE_PAYER_SENDER = 'SENDER'
+FEE_PAYER_PRIMARY_RECEIVER = 'PRIMARYRECEIVER'
+FEE_PAYER_EACH_RECEIVER = 'EACHRECEIVER'
+FEE_PAYER_SECONDARY_RECEIVERS = 'SECONDARYONLY'
+
+SUPPORTED_FEE_PAYERS = frozenset([FEE_PAYER_SENDER,
+                                  FEE_PAYER_PRIMARY_RECEIVER,
+                                  FEE_PAYER_EACH_RECEIVER,
+                                  FEE_PAYER_SECONDARY_RECEIVERS])
+
+EXECUTE_STATUS_CREATED = 'CREATED'
+EXECUTE_STATUS_COMPLETED = 'COMPLETED'
+EXECUTE_STATUS_INCOMPLETE = 'INCOMPLETE'
+EXECUTE_STATUS_ERROR = 'ERROR'
+EXECUTE_STATUS_REVERSAL_ERROR = 'REVERSALERROR'
+EXECUTE_STATUS_PROCESSING = 'PROCESSING'
+EXECUTE_STATUS_PENDING = 'PENDING'
 
 ##############################################################################
 # FUNCTIONS WHICH FURTHER AIDS IMPLEMENTATION OF THIS SERVICE
@@ -32,9 +51,13 @@ class ReceiverList(list):
     def append(self, obj):
         email = obj.get('email', None)
         amount = obj.get('amount', None)
-        if email and amount:
-            super(type(self), self).append(obj)
-        return False
+        if not email and not amount:
+            return False
+
+        sanitized = {'email': obj.get('email'),
+                     'amount': obj.get('amount'),
+                     'primary': obj.get('primary', 'false')}
+        super(type(self), self).append(sanitized)
 
     def extend(self, iterable):
         for obj in iterable:
@@ -60,7 +83,8 @@ def get_pay_url(client,
                 cancel_url,
                 return_url,
                 ipn_callback_url=None,
-                receivers=None):
+                receivers=None,
+                embedded=False):
     """Executes the Pay API call and returns the intended redirect URL
     directly using the necessary pay key returned in the PayPal response.
 
@@ -75,18 +99,21 @@ def get_pay_url(client,
     pay_key = response.get('payKey', None)
     if not pay_key:
         return None
-    return generate_pay_url(client, pay_key)
+    return generate_pay_url(client, pay_key, embedded=embedded)
 
-def generate_pay_url(client, pay_key):
+def generate_pay_url(client, pay_key, embedded=False):
     """Retrieves the pay key associated with prepared payment procedures and
     generates the intended URL to redirect end-users in order to finialize
     payments.
 
     :param client: An instance of ``'pypal.Client'``
     :param pay_key: The payment token received from PayPal
+    :param embedded: Whether or not to generate an url which
+                     is intended for an embedded payment experience.
     """
-    return client.get_paypal_url('/cgi-bin/webscr?cmd=_ap-payment'
-                                 '&paykey=%s' % pay_key)
+    paths = ('/cgi-bin/webscr?cmd=_ap-payment&paykey=%s',
+             '/webapps/adaptivepayment/flow/pay?paykey=%s')
+    return client.get_paypal_url(paths[embedded] % pay_key)
 
 ##############################################################################
 # FUNCTIONS WHICH DIRECTLY CORRESPONDS TO PAYPAL API CALLS
@@ -99,6 +126,7 @@ def pay(client,
         return_url,
         ipn_callback_url=None,
         receivers=None,
+        fees_payer=None,
         extra={}):
     """Execute the Pay API call which will prepare the payment procedure.
     Most importantly it will return a pay key which should be utilized in
@@ -107,6 +135,7 @@ def pay(client,
     :param client: An instance of ``'pypal.Client'``
     :param action_type: The payment action type
     :param currency_code: Which currency code to utilize in the transaction
+    :param fees_payer: Who will pay the PayPal fees
     :param cancel_url: The URL which the end-user is sent to on
                        payment cancellation.
     :param return_url: The URL which the end-user is sent to on completed
@@ -123,10 +152,14 @@ def pay(client,
         raise ValueError('Given currency code (%s) '
                          'is not supported' % currency_code)
 
-    if action_type not in EXISTING_PAY_ACTIONS:
+    if action_type not in SUPPORTED_PAY_ACTIONS:
         raise ValueError('Given payment action (%s) is not any of the '
                          'supported types; %s' % (action_type,
-                                                  EXISTING_PAY_ACTIONS))
+                                                  SUPPORTED_PAY_ACTIONS))
+
+    if fees_payer and fees_payer not in SUPPORTED_FEE_PAYERS:
+        raise ValueError('Given value (%s) for the fees_payer argument '
+                         'is not supported by PayPal' % fees_payer)
 
     if not isinstance(receivers, ReceiverList):
         if not isinstance(receivers, (list, tuple)):
@@ -134,14 +167,15 @@ def pay(client,
         receivers = ReceiverList(receivers)
 
     extra.update({'actionType': action_type,
-                  'receiverList.receiver': receivers,
+                  'receiverList': {
+                      'receiver': receivers,
+                  },
                   'currencyCode': currency_code,
                   'cancelUrl': cancel_url,
-                  'returnUrl': return_url,
-                  'requestEnvelope.errorLanguage': 'en_US'})
+                  'returnUrl': return_url})
 
-    if ipn_callback_url is not None:
-        extra['ipnNotificationUrl'] = ipn_callback_url
+    set_nonempty_param(extra, 'ipnNotificationUrl', ipn_callback_url)
+    set_nonempty_param(extra, 'feesPayer', fees_payer)
     return call(client, 'Pay', extra)
 
 def get_payment_options(client, pay_key):
@@ -175,8 +209,10 @@ def set_payment_options(client,
     set_nonempty_param(extra, 'shippingAddressId', shipping_address_id)
     set_nonempty_param(extra, 'senderOptions', sender_options)
     set_nonempty_param(extra, 'receiverOptions', receiver_options)
-    logging.debug(extra)
     return call(client, 'SetPaymentOptions', extra)
+
+def execute(client, pay_key):
+    return call(client, 'ExecutePayment', {'payKey': pay_key})
 
 def get_shipping_addresses(client, key):
     """Execute the GetShippingAddresses API call which will retrieve
