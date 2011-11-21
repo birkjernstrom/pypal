@@ -18,6 +18,8 @@ a chain of API calls.
 
 import logging
 import urllib2
+import json
+import time
 
 from pypal import settings, util
 
@@ -81,9 +83,9 @@ class Response(dict):
             return False
 
         ack = self.get_ack(as_upper=True)
-        if not ack:
-            return False
-        return (ack == ACK_SUCCESS or ack == ACK_SUCCESS_WITH_WARNING)
+        if ack:
+            return (ack != ACK_FAILURE)
+        return False
 
     success = property(is_success)
 
@@ -114,7 +116,11 @@ class Client(object):
         else:
             self.config = config
 
-    def call(self, api_group, api_action, endpoint=None, **params):
+    def call(self,
+             api_group,
+             api_action,
+             endpoint=None,
+             **params):
         """Wrapper of our send method which simplifies URL generation
         depending on intended API group and actions.
 
@@ -132,9 +138,10 @@ class Client(object):
         if 'requestEnvelope' not in params:
             params['requestEnvelope'] = self.config.request_envelope
 
-        try:
-            request_body = self.render_request_body(params)
+        headers = self.get_headers()
+        request_body = self.render_request_body(params)
 
+        try:
             response = self.send(url, request_body)
             response_body = response.read()
             data = self.parse_response_body(response_body)
@@ -143,7 +150,7 @@ class Client(object):
             return Response(None, None, http_error=e)
         return Response(response_body, data)
 
-    def send(self, url, body=None):
+    def send(self, url, body):
         """Send an API request against given url.
 
         :param url: The PayPal URL to target
@@ -159,18 +166,18 @@ class Client(object):
 
         They contain the credentials required to successfully authenticate
         your application along with specification of which format to utilize.
-
         """
         ret = {}
         if self.config.application_id:
             ret['X-PAYPAL-APPLICATION-ID'] = self.config.application_id
 
+        ret['X-PAYPAL-REQUEST-DATA-FORMAT'] = self.config.api_format
+        ret['X-PAYPAL-RESPONSE-DATA-FORMAT'] = self.config.api_format
+
         if self.config.token_authentication:
             ret['X-PAYPAL-SECURITY-USERID'] = self.config.api_username
             ret['X-PAYPAL-SECURITY-PASSWORD'] = self.config.api_password
             ret['X-PAYPAL-SECURITY-SIGNATURE'] = self.config.api_signature
-            ret['X-PAYPAL-REQUEST-DATA-FORMAT'] = self.config.api_format
-            ret['X-PAYPAL-RESPONSE-DATA-FORMAT'] = self.config.api_format
             return ret
 
         # TODO: Implement the authentication method utilizing given
@@ -189,10 +196,22 @@ class Client(object):
         dictionary = formatter(response)
         return util.ensure_unicode(dictionary)
 
+    def parse(self, raw_response):
+        """Trigger the appropriate parse method depending on which protocol
+        is being used.
+
+        :param raw_response: The raw string given in the PayPal response
+        """
+        return self._get_protocol_method(parse_action=True)(raw_response)
+
     @classmethod
     def parse_json(cls, response):
-        json = get_json_module()
         return json.loads(response)
+
+    @classmethod
+    def parse_nvp(cls, response):
+        from pypal.nvp import parse
+        return parse(response)
 
     def render_request_body(self, params, format=None):
         params = util.ensure_unicode(params)
@@ -201,8 +220,12 @@ class Client(object):
 
     @classmethod
     def render_json(cls, params):
-        json = get_json_module()
-        return json.dumps(params)
+        return json.dumps(params, default=util.json_defaults)
+
+    @classmethod
+    def render_nvp(cls, params):
+        from pypal.nvp import render
+        return render(params)
 
     def _get_format_method(self, parse_method, format=None):
         if not format:
@@ -212,11 +235,3 @@ class Client(object):
         method_prefixes = ('render', 'parse')
         method_name = '%s_%s' % (method_prefixes[parse_method], format)
         return getattr(self, method_name)
-
-
-def get_json_module():
-    try:
-        import json
-    except ImportError:
-        import simplejson as json
-    return json

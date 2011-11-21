@@ -1,5 +1,7 @@
 # -*- coding: utf-8 -*-
 
+import json
+
 TIME_FORMAT = '%a %b %d %H:%M:%S %Y'
 
 def convert_timestamp_into_utc(timestamp):
@@ -70,23 +72,7 @@ def ensure_unicode(obj):
         return obj.decode('utf-8')
     return obj
 
-
-def prepare_nvp_dict(source, target={}, prefix=''):
-    if not is_iterable(source):
-        target[prefix] = source
-        return target
-
-    if isinstance(source, (list, tuple, set, frozenset)):
-        index = 0
-        for inner_value in source:
-            inner_prefix = '%s(%s)' % (prefix, index)
-            target = prepare_nvp_dict(inner_value, target, inner_prefix)
-            index += 1
-        return target
-
-    for key, value in source.items():
-        inner_prefix = key
-        if prefix:
-            inner_prefix = '%s.%s' % (prefix, key)
-        target = prepare_nvp_dict(value, target, inner_prefix)
-    return target
+def json_defaults(obj):
+    if isinstance(obj, (set, frozenset)):
+        return list(obj)
+    return obj

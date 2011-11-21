@@ -32,6 +32,8 @@ RECURRING_PAYMENT_REPORT = 'RECURRING_PAYMENT_REPORT'
 EXTENDED_PRO_PROCESSING_REPORT = 'EXTENDED_PRO_PROCESSING_REPORT'
 EXCEPTION_PROCESSING_REPORT = 'EXCEPTION_PROCESSING_REPORT'
 ACCOUNT_MANAGEMENT_PERMISSION = 'ACCOUNT_MANAGEMENT_PERMISSION'
+ACCESS_BASIC_PERSONAL_DATA = 'ACCESS_BASIC_PERSONAL_DATA'
+ACCESS_ADVANCED_PERSONAL_DATA = 'ACCESS_ADVANCED_PERSONAL_DATA'
 
 REQUIRES_APPROVAL = frozenset([SETTLEMENT_CONSOLIDATION,
                                SETTLEMENT_REPORTING,
@@ -112,8 +114,14 @@ REQUEST_PERMISSION_MAPPING = {
     'BMButtonSearch': BUTTON_MANAGER,
 
     # Manage pending transaction status mappings
-    'ManagePendingTransactionStatus': MANAGE_PENDING_TRANSACTION_STATUS
+    'ManagePendingTransactionStatus': MANAGE_PENDING_TRANSACTION_STATUS,
+
+    # Retrieve personal data about an account which has granted
+    # your application certain permissions.
+    'GetBasicPersonalData': ACCESS_BASIC_PERSONAL_DATA,
+    'GetAdvancedPersonalData': ACCESS_ADVANCED_PERSONAL_DATA
 }
+
 
 ##############################################################################
 # FUNCTIONS WHICH FURTHER AIDS IMPLEMENTATION OF THIS SERVICE
@@ -173,8 +181,8 @@ def get_access_token(client, request_token, verification_code):
     return call(client, 'GetAccessToken', params)
 
 
-def get(client):
-    pass
+def get(client, access_token):
+    return call(client, 'GetPermissions', dict(token=access_token))
 
 
 def request(client, groups, callback_url):
@@ -189,5 +197,5 @@ def request(client, groups, callback_url):
     return call(client, 'RequestPermissions', params)
 
 
-def cancel(client):
-    pass
+def cancel(client, access_token):
+    return call(client, 'CancelPermissions', dict(token=access_token))

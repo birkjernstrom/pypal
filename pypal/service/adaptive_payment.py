@@ -77,20 +77,21 @@ def call(client, method, params):
     return client.call('AdaptivePayments', method,
                        endpoint=endpoint, **params)
 
-def get_pay_url(client,
-                action_type,
-                currency_code,
-                cancel_url,
-                return_url,
-                ipn_callback_url=None,
-                receivers=None,
-                embedded=False):
+def get_payment_url(client,
+                    action_type,
+                    currency_code,
+                    cancel_url,
+                    return_url,
+                    ipn_callback_url=None,
+                    receivers=None,
+                    fees_payer=None,
+                    extra={},
+                    embedded=False):
     """Executes the Pay API call and returns the intended redirect URL
     directly using the necessary pay key returned in the PayPal response.
 
     This function is a wrapper of ``'pay'`` which will execute the necessary
     API calls and using the response this function will generate the URL.
-
     """
     response = pay(**locals())
     if not response.success:
@@ -124,7 +125,7 @@ def pay(client,
         currency_code,
         cancel_url,
         return_url,
-        ipn_callback_url=None,
+        ipn_callback_url,
         receivers=None,
         fees_payer=None,
         extra={}):
@@ -135,18 +136,21 @@ def pay(client,
     :param client: An instance of ``'pypal.Client'``
     :param action_type: The payment action type
     :param currency_code: Which currency code to utilize in the transaction
-    :param fees_payer: Who will pay the PayPal fees
     :param cancel_url: The URL which the end-user is sent to on
                        payment cancellation.
     :param return_url: The URL which the end-user is sent to on completed
                        payment, in all cases be it success or failure.
-    :param ipn_callback_url: Override the IPN URL which PayPal will send
-                             notifications to regarding this request.
+    :param ipn_callback_url: The URL which will receive the IPN notifications
+                             related to this operation. The Adaptive Payment API
+                             requires this to be explicitly set and does not
+                             fallback on the default IPN URL for the
+                             application.
     :param receivers: A list of the receivers of this transaction
+    :param fees_payer: Who will pay the PayPal fees
     :param extra: Additional key-value arguments to send to PayPal
     """
     check_required(locals(), ('cancel_url', 'return_url', 'currency_code',
-                              'action_type', 'receivers'))
+                              'action_type', 'receivers', 'ipn_callback_url'))
 
     if not currency.is_valid_code(currency_code):
         raise ValueError('Given currency code (%s) '
@@ -167,9 +171,7 @@ def pay(client,
         receivers = ReceiverList(receivers)
 
     extra.update({'actionType': action_type,
-                  'receiverList': {
-                      'receiver': receivers,
-                  },
+                  'receiverList': { 'receiver': receivers },
                   'currencyCode': currency_code,
                   'cancelUrl': cancel_url,
                   'returnUrl': return_url})
@@ -183,9 +185,9 @@ def get_payment_options(client, pay_key):
 
 def set_payment_options(client,
                         pay_key,
-                        sender_options=None,
-                        receiver_options=None,
+                        receiver_options,
                         display_options=None,
+                        sender_options=None,
                         shipping_address_id=None,
                         initiating_entity=None,
                         extra={}):
